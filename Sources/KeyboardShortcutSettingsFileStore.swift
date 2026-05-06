@@ -22,79 +22,6 @@ final class CmuxSettingsFileStore {
     static let currentSchemaVersion = 1
     static let schemaURLString = "https://raw.githubusercontent.com/manaflow-ai/cmux/main/web/data/cmux.schema.json"
     private static let legacySchemaURLString = "https://raw.githubusercontent.com/manaflow-ai/cmux/main/web/data/cmux-settings.schema.json"
-    // Keep this in sync with the parser below and the web schema/docs. Settings UI rows
-    // validate against this set so new persisted settings need an explicit cmux.json review.
-    static let supportedSettingsJSONPaths: Set<String> = [
-        "app.language",
-        "app.appearance",
-        "app.appIcon",
-        "app.menuBarOnly",
-        "app.newWorkspacePlacement",
-        "app.minimalMode",
-        "app.keepWorkspaceOpenWhenClosingLastSurface",
-        "app.focusPaneOnFirstClick",
-        "app.preferredEditor",
-        "app.openMarkdownInCmuxViewer",
-        "app.iMessageMode",
-        "app.reorderOnNotification",
-        "app.sendAnonymousTelemetry",
-        "app.warnBeforeQuit",
-        "app.renameSelectsExistingName",
-        "app.commandPaletteSearchesAllSurfaces",
-        "terminal.showScrollBar",
-        "notifications.dockBadge",
-        "notifications.showInMenuBar",
-        "notifications.unreadPaneRing",
-        "notifications.paneFlash",
-        "notifications.sound",
-        "notifications.customSoundFilePath",
-        "notifications.command",
-        "sidebar.hideAllDetails",
-        "sidebar.branchLayout",
-        "sidebar.showNotificationMessage",
-        "sidebar.showBranchDirectory",
-        "sidebar.showPullRequests",
-        "sidebar.makePullRequestsClickable",
-        "sidebar.openPullRequestLinksInCmuxBrowser",
-        "sidebar.openPortLinksInCmuxBrowser",
-        "sidebar.showSSH",
-        "sidebar.showPorts",
-        "sidebar.showLog",
-        "sidebar.showProgress",
-        "sidebar.showCustomMetadata",
-        "workspaceColors.indicatorStyle",
-        "workspaceColors.selectionColor",
-        "workspaceColors.notificationBadgeColor",
-        "workspaceColors.colors",
-        "workspaceColors.paletteOverrides",
-        "workspaceColors.customColors",
-        "sidebarAppearance.matchTerminalBackground",
-        "sidebarAppearance.tintColor",
-        "sidebarAppearance.lightModeTintColor",
-        "sidebarAppearance.darkModeTintColor",
-        "sidebarAppearance.tintOpacity",
-        "automation.socketControlMode",
-        "automation.socketPassword",
-        "automation.claudeCodeIntegration",
-        "automation.claudeBinaryPath",
-        "automation.cursorIntegration",
-        "automation.geminiIntegration",
-        "automation.portBase",
-        "automation.portRange",
-        "browser.defaultSearchEngine",
-        "browser.showSearchSuggestions",
-        "browser.theme",
-        "browser.openTerminalLinksInCmuxBrowser",
-        "browser.interceptTerminalOpenCommandInCmuxBrowser",
-        "browser.hostsToOpenInEmbeddedBrowser",
-        "browser.urlsToAlwaysOpenExternally",
-        "browser.insecureHttpHostsAllowedInEmbeddedBrowser",
-        "browser.showImportHintOnBlankTabs",
-        "browser.reactGrabVersion",
-        "shortcuts.showModifierHoldHints",
-        "shortcuts.bindings",
-    ]
-
     private static let releaseBundleIdentifier = "com.cmuxterm.app"
     private static let backupsDefaultsKey = "cmux.settingsFile.backups.v1"
     fileprivate static let socketPasswordBackupIdentifier = "automation.socketPassword"
@@ -490,6 +417,15 @@ final class CmuxSettingsFileStore {
             snapshot.managedUserDefaults[TerminalScrollBarSettings.showScrollBarKey] = .bool(value)
         } else if section.keys.contains("showScrollBar") {
             logInvalid("terminal.showScrollBar", sourcePath: sourcePath)
+        }
+
+        for agent in SessionAgent.allCases {
+            let jsonField = VaultAgentVisibilitySettings.jsonField(for: agent)
+            if let value = jsonBool(section[jsonField]) {
+                snapshot.managedUserDefaults[VaultAgentVisibilitySettings.key(for: agent)] = .bool(value)
+            } else if section.keys.contains(jsonField) {
+                logInvalid("terminal.\(jsonField)", sourcePath: sourcePath)
+            }
         }
     }
 
@@ -1048,7 +984,10 @@ final class CmuxSettingsFileStore {
         }
 
         if didMutateStoredValue {
-            applyManagedDefaultSideEffects(for: defaultsKey, notifyScrollBar: defaultsKey == TerminalScrollBarSettings.showScrollBarKey, source: "cmuxConfig.applyManagedDefault")
+            applyManagedDefaultSideEffects(
+                for: defaultsKey,
+                source: "cmuxConfig.applyManagedDefault"
+            )
         }
     }
 
@@ -1085,12 +1024,20 @@ final class CmuxSettingsFileStore {
         }
 
         if didMutateStoredValue {
-            applyManagedDefaultSideEffects(for: defaultsKey, notifyScrollBar: defaultsKey == TerminalScrollBarSettings.showScrollBarKey, source: "cmuxConfig.restoreUserDefault")
+            applyManagedDefaultSideEffects(
+                for: defaultsKey,
+                source: "cmuxConfig.restoreUserDefault"
+            )
         }
     }
 
-    private func applyManagedDefaultSideEffects(for defaultsKey: String, notifyScrollBar: Bool, source: String) {
+    private func applyManagedDefaultSideEffects(
+        for defaultsKey: String,
+        source: String
+    ) {
         let notificationCenter = notificationCenter
+        let notifyScrollBar = defaultsKey == TerminalScrollBarSettings.showScrollBarKey
+        let notifyVaultAgentVisibility = VaultAgentVisibilitySettings.isDefaultsKey(defaultsKey)
         let language = defaultsKey == LanguageSettings.languageKey ? AppLanguage(rawValue: UserDefaults.standard.string(forKey: defaultsKey) ?? "") ?? .system : nil
         let shouldApplyAppearance = defaultsKey == AppearanceSettings.appearanceModeKey
         let appearanceRawValue = shouldApplyAppearance ? UserDefaults.standard.string(forKey: defaultsKey) : nil
@@ -1098,6 +1045,9 @@ final class CmuxSettingsFileStore {
         let apply = {
             if notifyScrollBar {
                 TerminalScrollBarSettings.notifyDidChange(notificationCenter: notificationCenter)
+            }
+            if notifyVaultAgentVisibility {
+                VaultAgentVisibilitySettings.notifyDidChange(notificationCenter: notificationCenter)
             }
 
             if let language {
@@ -1250,6 +1200,10 @@ final class CmuxSettingsFileStore {
             [
                 "terminal": [
                     "showScrollBar": TerminalScrollBarSettings.defaultShowScrollBar,
+                    "vaultShowClaudeSessions": VaultAgentVisibilitySettings.defaultValue,
+                    "vaultShowCodexSessions": VaultAgentVisibilitySettings.defaultValue,
+                    "vaultShowOpenCodeSessions": VaultAgentVisibilitySettings.defaultValue,
+                    "vaultShowRovoDevSessions": VaultAgentVisibilitySettings.defaultValue,
                 ],
             ],
             [
